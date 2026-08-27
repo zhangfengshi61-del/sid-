@@ -1,0 +1,37 @@
+{
+  "schema": "servesid/derived-lists/1",
+  "description": "Anonymized per-request ranked-list cells for the supplemental sensitivity experiments.",
+  "npz_fields": [
+    "gt_item",
+    "gt_pop",
+    "gt_bucket",
+    "valid",
+    "t_top",
+    "s_top",
+    "t_n",
+    "s_n",
+    "s_raw",
+    "s_invalid",
+    "bucket_lo",
+    "bucket_hi",
+    "n_test",
+    "W",
+    "topk"
+  ],
+  "cells": [
+    {"cell_id": "K5_B35_Sci_seed42", "axis": "K", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 5, "B": 35, "negative_scope": "all_outsiders"},
+    {"cell_id": "K10_B40_Sci_seed42", "axis": "K", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 40, "negative_scope": "all_outsiders"},
+    {"cell_id": "K20_B50_Sci_seed42", "axis": "K", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 20, "B": 50, "negative_scope": "all_outsiders"},
+    {"cell_id": "K5_B35_MI_seed42", "axis": "K", "dataset": "Musical_Instruments", "seed": 42, "K_train": 5, "B": 35, "negative_scope": "all_outsiders"},
+    {"cell_id": "K10_B40_MI_seed42", "axis": "K", "dataset": "Musical_Instruments", "seed": 42, "K_train": 10, "B": 40, "negative_scope": "all_outsiders"},
+    {"cell_id": "K20_B50_MI_seed42", "axis": "K", "dataset": "Musical_Instruments", "seed": 42, "K_train": 20, "B": 50, "negative_scope": "all_outsiders"},
+    {"cell_id": "K5_B35_VG_seed42", "axis": "K", "dataset": "Video_Games", "seed": 42, "K_train": 5, "B": 35, "negative_scope": "all_outsiders"},
+    {"cell_id": "K10_B40_VG_seed42", "axis": "K", "dataset": "Video_Games", "seed": 42, "K_train": 10, "B": 40, "negative_scope": "all_outsiders"},
+    {"cell_id": "K20_B50_VG_seed42", "axis": "K", "dataset": "Video_Games", "seed": 42, "K_train": 20, "B": 50, "negative_scope": "all_outsiders"},
+    {"cell_id": "B20_fixed10_Sci_seed42", "axis": "B", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 20, "negative_scope": "shared_fixed_10"},
+    {"cell_id": "B30_fixed10_Sci_seed42", "axis": "B", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 30, "negative_scope": "shared_fixed_10"},
+    {"cell_id": "B40_fixed10_Sci_seed42", "axis": "B", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 40, "negative_scope": "shared_fixed_10"},
+    {"cell_id": "B50_fixed10_Sci_seed42", "axis": "B", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 50, "negative_scope": "shared_fixed_10"},
+    {"cell_id": "B60_fixed10_Sci_seed42", "axis": "B", "dataset": "Industrial_and_Scientific", "seed": 42, "K_train": 10, "B": 60, "negative_scope": "shared_fixed_10"}
+  ]
+}

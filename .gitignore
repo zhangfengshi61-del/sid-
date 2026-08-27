@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Model checkpoints and caches (regenerate from public assets)
+*.pt
+*.pth
+*.ckpt
+
+# Local scratch and archives
+*.log
+*.zip
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db

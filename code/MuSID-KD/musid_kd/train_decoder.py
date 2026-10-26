@@ -328,7 +328,12 @@ def _setup_beam_validation(args, device):
             raise RuntimeError("SID-MLP++ validation failed to patch the TIGER teacher encoder.")
         print(f"Patched TIGER teacher encoder with SID-MLP++ encoder for validation: {args.encoder_ckpt}", flush=True)
 
-    split = "val" if "val" in pipeline.tokenized_datasets else "test"
+    if "val" not in pipeline.tokenized_datasets:
+        raise RuntimeError(
+            "Validation split is required for checkpoint selection; "
+            "refusing to use the test split."
+        )
+    split = "val"
     loader = DataLoader(
         pipeline.tokenized_datasets[split],
         batch_size=args.val_batch_size,

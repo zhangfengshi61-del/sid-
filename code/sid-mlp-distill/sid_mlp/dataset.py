@@ -75,6 +75,9 @@ def attach_beam_dump(dataset: CommonLensDataset, dump_path: str, device: torch.d
         if 'step_logp' not in d or d['step_logp'].shape != d['codes'].shape:
             raise ValueError("MuSID-KD requires aligned step_logp [N,M,L] in teacher dump")
         d = dict(d)
+        valid0 = torch.arange(d['codes'].shape[1]).unsqueeze(0) < d['nvalid'].unsqueeze(1)
+        if not torch.isfinite(d['step_logp'].float()[valid0]).all():
+            raise ValueError("MuSID-KD teacher step_logp has nonfinite entries in valid candidates")
         # Paper score sums SID-token log probabilities only (not EOS).
         d['scores'] = d['step_logp'].float().sum(-1)
     if score_from_steps or (topm and int(topm) > 0):
@@ -102,6 +105,12 @@ def attach_beam_dump(dataset: CommonLensDataset, dump_path: str, device: torch.d
         raise RuntimeError(f"beam dump rows ({n_dump}) != dataset rows ({n_ds}): {dump_path}")
     if int(d['nvalid'].min()) < 1:
         raise RuntimeError(f"beam dump has empty candidate lists: {dump_path}")
+    if score_from_steps:
+        # Invalid padded candidates can have -inf logps; zero them so masked
+        # RIGD pair differences never evaluate (-inf)*0 into NaN.
+        valid = torch.arange(d['codes'].shape[1]).unsqueeze(0) < d['nvalid'].unsqueeze(1)
+        d['step_logp'] = torch.where(valid.unsqueeze(-1), d['step_logp'].float(),
+                                    torch.zeros_like(d['step_logp'], dtype=torch.float32))
     dataset.bm_codes = d['codes'].to(device)
     dataset.bm_scores = d['scores'].to(device)
     dataset.bm_nvalid = d['nvalid'].to(device)

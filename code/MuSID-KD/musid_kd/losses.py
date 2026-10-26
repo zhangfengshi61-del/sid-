@@ -1,4 +1,4 @@
-"""Loss functions for SID-MLP distillation training."""
+"""Historical baseline loss functions (MuSID-KD losses: objectives.py)."""
 
 import torch
 import torch.nn.functional as F

@@ -2,7 +2,7 @@
 import unittest
 import torch
 
-from sid_mlp.musid_kd import hcda_loss, rigd_loss, estimate_rigd_scales
+from musid_kd.objectives import hcda_loss, rigd_loss, estimate_rigd_scales
 
 
 class MuSIDLossTests(unittest.TestCase):

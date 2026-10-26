@@ -1,4 +1,4 @@
-"""GPU-resident data packing for the public SID-MLP path."""
+"""MuSID-KD packed data and aligned teacher SID-path targets."""
 
 import gc
 import json

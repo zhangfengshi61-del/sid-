@@ -1,6 +1,6 @@
 # MuSID-KD: Structured Distillation for Multi-Token Semantic IDs (WWW 2027)
 
-This repository's **default training overlay is MuSID-KD**. It adapts the
+The paper implementation lives in **`code/MuSID-KD/`**, with Python package **`musid_kd`** and CLI **`musid-kd`**. It adapts the
 SID-MLP framework to a frozen TIGER teacher and trains lightweight
 prefix-conditioned students using:
 
@@ -20,13 +20,13 @@ verifier, reranker, or additional KD component at inference.
 
 | Path | Description |
 | --- | --- |
-| [code/sid-mlp-distill](code/sid-mlp-distill/README.md) | MuSID-KD training and inference overlay |
-| [sid_mlp/musid_kd.py](code/sid-mlp-distill/sid_mlp/musid_kd.py) | HCDA / RIGD / training-only scales |
-| [configs/musid_kd.yaml](code/sid-mlp-distill/configs/musid_kd.yaml) | Paper coefficients and core hyperparameters |
-| [scripts/run_musid_seeds.sh](code/sid-mlp-distill/scripts/run_musid_seeds.sh) | Run independent seeds 42, 43, 44 |
-| [tests/test_musid_kd.py](code/sid-mlp-distill/tests/test_musid_kd.py) | CPU numerical checks |
+| [code/MuSID-KD](code/MuSID-KD/README.md) | MuSID-KD training and inference overlay |
+| [musid_kd/objectives.py](code/MuSID-KD/musid_kd/objectives.py) | HCDA / RIGD / training-only scales |
+| [configs/musid_kd.yaml](code/MuSID-KD/configs/musid_kd.yaml) | Paper coefficients and core hyperparameters |
+| [scripts/run_musid_seeds.sh](code/MuSID-KD/scripts/run_musid_seeds.sh) | Run independent seeds 42, 43, 44 |
+| [tests/test_musid_kd.py](code/MuSID-KD/tests/test_musid_kd.py) | CPU numerical checks |
 
-The overlay is applied to the public SID-MLP upstream checkout at commit
+The MuSID-KD package reuses baseline SID encoding/beam utilities from SID-MLP at commit
 `02d9d8e9e8a8f7c92af63e108215174b5a60b72c`; see the detailed README
 for setup. A request-aligned teacher beam dump **including** four per-token
 log probabilities is mandatory. The training loader ranks cached candidates by
@@ -49,5 +49,5 @@ repository does not supply all raw data and teacher checkpoints.
 
 Earlier ServeSID code, fixed manifests, AAAI artifact files and analysis
 scripts are preserved for provenance, not represented as results for
-MuSID-KD. The older configuration remains explicitly selectable at
-`code/sid-mlp-distill/configs/servesid_final.yaml`.
+MuSID-KD. Legacy baseline configuration remains selectable at
+`code/MuSID-KD/configs/legacy/servesid_final.yaml` with the `sidmlp` compatibility command.

@@ -1,4 +1,4 @@
-"""Public training entrypoint for SID-MLP and SID-MLP++."""
+"""MuSID-KD CLI, with optional historical SID-MLP baseline commands."""
 
 import argparse
 import ast
@@ -181,10 +181,16 @@ def _run_decoder(args, *, require_encoder):
 
 def main(argv=None):
     config = _load_config(_find_config_path(argv))
-    parser = argparse.ArgumentParser(description="SID-MLP public training CLI")
+    parser = argparse.ArgumentParser(description="MuSID-KD student training CLI")
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
-    sidmlp = subparsers.add_parser("sidmlp", help="train SID-MLP decoder")
+    musid = subparsers.add_parser("musid-kd", help="train MuSID-KD student")
+    _add_decoder_args(musid)
+    musid.set_defaults(musid_kd=True,
+                       _runner=lambda args: _run_decoder(args, require_encoder=False))
+
+    # Historical baselines retained as optional compatibility modes.
+    sidmlp = subparsers.add_parser("sidmlp", help="train legacy SID-MLP decoder")
     _add_decoder_args(sidmlp)
     sidmlp.set_defaults(_runner=lambda args: _run_decoder(args, require_encoder=False))
 
@@ -196,7 +202,7 @@ def main(argv=None):
     _add_decoder_args(stage2)
     stage2.set_defaults(_runner=lambda args: _run_decoder(args, require_encoder=True))
 
-    for subparser in (sidmlp, stage1, stage2):
+    for subparser in (musid, sidmlp, stage1, stage2):
         _apply_config_defaults(subparser, config)
 
     args = parser.parse_args(argv)

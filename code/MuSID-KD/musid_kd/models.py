@@ -395,3 +395,19 @@ class SetReranker(nn.Module):
             h = self.encoder(tok)
         resid = self.out(h).squeeze(-1)
         return base_scores + resid.masked_fill(~valid_mask, 0.0)
+
+# These MuSID-KD class names keep the established prefix-conditioned
+# SID student architecture and checkpoint parameter keys unchanged.
+class MuSIDStudentMLP(SIDMLP):
+    """MuSID-KD student with standard history readout."""
+    pass
+
+
+class MuSIDStudentGRU(SIDMLPGRU):
+    """MuSID-KD student with GRU history readout."""
+    pass
+
+
+class MuSIDStudentCNN(SIDMLPCNN):
+    """MuSID-KD student with CNN history readout."""
+    pass

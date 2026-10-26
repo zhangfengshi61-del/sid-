@@ -25,7 +25,7 @@ The second command independently recomputes 18 ranked-list metrics for each of
 
 | Path | Contents |
 |---|---|
-| `code/sid-mlp-distill/` | Final method overlay, launcher, and adopted configuration. |
+| `code/MuSID-KD/` | Final method overlay, launcher, and adopted configuration. |
 | `code/baselines/` | Same-harness baseline implementations and speed evaluation. |
 | `code/*.py` | Data preparation, evaluation, mechanisms, table assembly, and verification. |
 | `data/derived/s53/` | De-identified per-request ranked lists for 14 sensitivity cells. |
@@ -37,15 +37,15 @@ data schema and availability boundary.
 
 ## Full training
 
-The final method is an overlay on public SID-MLP commit
+The historical ServeSID method used a public SID-MLP checkout at commit
 `02d9d8e9e8a8f7c92af63e108215174b5a60b72c`. Apply the overlay as described in
-`code/sid-mlp-distill/README.md`, prepare the public Amazon Reviews 2023
+`code/MuSID-KD/README.md`, prepare the public Amazon Reviews 2023
 categories with the upstream TIGER/SID-MLP pipeline, then use:
 
 ```bash
-export SERVESID_ROOT="$(pwd)"
-export CONFIG="$SERVESID_ROOT/code/sid-mlp-distill/configs/servesid_final.yaml"
-bash code/sid-mlp-distill/scripts/train.sh sidmlp \
+export MUSID_KD_ROOT="$(pwd)"
+export CONFIG="$MUSID_KD_ROOT/code/MuSID-KD/configs/legacy/servesid_final.yaml"
+bash code/MuSID-KD/scripts/train.sh sidmlp \
   Industrial_and_Scientific 0
 ```
 

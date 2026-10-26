@@ -1,4 +1,4 @@
-"""Training loop for the public SID-MLP decoder."""
+"""MuSID-KD training and historical baseline compatibility."""
 
 import datetime as dt
 import os
@@ -34,8 +34,9 @@ from .losses import (
     student_list_scores_pd,
     topk_correct,
 )
-from .models import SIDMLP, SIDMLPJP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN  # s23/s24
-from .musid_kd import hcda_loss, rigd_loss, estimate_rigd_scales
+from .models import (SIDMLP, SIDMLPJP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN,
+                     MuSIDStudentMLP, MuSIDStudentGRU, MuSIDStudentCNN)
+from .objectives import hcda_loss, rigd_loss, estimate_rigd_scales
 
 import torch.nn.functional as F
 
@@ -52,7 +53,8 @@ def _fmt_float(value):
 
 def _save_prefix(args):
     attn = f"_ad{args.attn_dim}" if args.attn_dim > 0 else ""
-    variant = "sidmlpp" if getattr(args, "encoder_ckpt", None) else "sidmlp"
+    variant = ("musid_kd" if getattr(args, "musid_kd", False) else
+               ("sidmlpp" if getattr(args, "encoder_ckpt", None) else "sidmlp"))
     base = (
         f"{args.category}_{variant}_k0_xattn"
         f"_h{args.num_heads}_f{args.ffn_dim}{attn}"
@@ -385,8 +387,9 @@ def train_sidmlp(args):
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ckpt_dir = os.path.abspath(args.ckpt_dir or os.path.join(graph_dir, "SID-MLP", "ckpt"))
-    log_dir = os.path.abspath(args.log_dir or os.path.join(graph_dir, "SID-MLP", "logs"))
+    output_subdir = "MuSID-KD" if musid else "SID-MLP"
+    ckpt_dir = os.path.abspath(args.ckpt_dir or os.path.join(graph_dir, output_subdir, "ckpt"))
+    log_dir = os.path.abspath(args.log_dir or os.path.join(graph_dir, output_subdir, "logs"))
     os.makedirs(ckpt_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
     save_prefix = _save_prefix(args)
@@ -514,7 +517,8 @@ def train_sidmlp(args):
         print(f"SIDMLPJP: {jp_pairs.shape[0]} occupied (d1,d2) prefixes", flush=True)
     else:
         if musid:
-            model_cls = {"mlp": SIDMLP, "gru": SIDMLPGRU, "cnn": SIDMLPCNN}[getattr(args, "readout", "mlp")]
+            model_cls = {"mlp": MuSIDStudentMLP, "gru": MuSIDStudentGRU,
+                         "cnn": MuSIDStudentCNN}[getattr(args, "readout", "mlp")]
         else:
             model_cls = SIDMLPPD if variant != "base" else SIDMLP  # s23
         if variant != "base":
@@ -528,7 +532,7 @@ def train_sidmlp(args):
     if args.epochs >= BEAM_VAL_INTERVAL and variant != "jp":  # s24: JP evals via frontier only
         beam_t5, beam_loader, beam_valid_tensors = _setup_beam_validation(args, device)
 
-    log(f"Training {'SID-MLP++' if args.encoder_ckpt else 'SID-MLP'}")
+    log(f"Training {'MuSID-KD' if musid else ('SID-MLP++' if args.encoder_ckpt else 'SID-MLP')}")
     log(f"train={len(train_ds)} val={len(val_ds)} checkpoint_dir={ckpt_dir}")
     if use_s24:
         log(f"s24: beam_dump={args.beam_dump} seqkd={getattr(args, 'seqkd', False)} "

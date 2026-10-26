@@ -1,4 +1,4 @@
-"""SID-MLP and SID-MLP++ beam-search inference."""
+"""MuSID-KD and historical SID-MLP constrained-beam inference."""
 
 import glob
 import math
@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .beam import build_valid_tensors, gather_d4_mask, lookup_item_idx
 from .constants import CODEBOOK_SIZE, DIGIT_OFFSETS, quad_key_int, triplet_key_int
-from .models import SIDMLP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN  # s23/MuSID-KD
+from .models import SIDMLP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN, MuSIDStudentMLP, MuSIDStudentGRU, MuSIDStudentCNN
 from .pretrain_encoder import build_encoder, infer_encoder_config
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +51,7 @@ def build_tiger_pipeline(args):
         config_dict={
             "category": args.category,
             "custom_sem_ids_path": sem_ids_path,
-            "run_id": "sid_mlp_public_infer",
+            "run_id": "musid_kd_public_infer",
         },
     )
 
@@ -90,7 +90,11 @@ def build_sidmlp_from_checkpoint(checkpoint_path, embedding_weight, device, *, l
         model = SIDMLPPD(embedding_weight, **_kwargs)
     else:
         readout = ckpt_args.get("readout", "mlp")
-        cls = {"mlp": SIDMLP, "gru": SIDMLPGRU, "cnn": SIDMLPCNN}.get(readout)
+        is_musid = bool(ckpt_args.get("musid_kd", False)) or ckpt.get("model_type") == "MuSID-KD"
+        classes = ({"mlp": MuSIDStudentMLP, "gru": MuSIDStudentGRU,
+                    "cnn": MuSIDStudentCNN} if is_musid else
+                   {"mlp": SIDMLP, "gru": SIDMLPGRU, "cnn": SIDMLPCNN})
+        cls = classes.get(readout)
         if cls is None:
             raise ValueError(f"Unknown checkpoint readout: {readout}")
         model = cls(embedding_weight, **_kwargs)

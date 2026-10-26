@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Portable launcher for the ServeSID final-method overlay.
+# Portable launcher: MuSID-KD default; ServeSID remains explicitly selectable.
 #
 # Usage:
 #   train.sh [mode] [category] [cuda_device]
@@ -24,7 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export SERVESID_ROOT="${SERVESID_ROOT:-$ROOT}"
 
 SID_MLP_DIR="${SID_MLP_DIR:-$SERVESID_ROOT/repos/SID-MLP}"
-CONFIG="${CONFIG:-$SERVESID_ROOT/code/sid-mlp-distill/configs/servesid_final.yaml}"
+CONFIG="${CONFIG:-$SERVESID_ROOT/code/sid-mlp-distill/configs/musid_kd.yaml}"
 GRAPH_DIR="${GRAPH_DIR:-${SID_MLP_GRAPH_DIR:-}}"
 MODEL_DIR="${MODEL_DIR:-}"
 BEAM_DUMP="${BEAM_DUMP:-}"
@@ -55,4 +55,4 @@ ARGS=( "$MODE" --config "$CONFIG" --category "$CATEGORY" \
        --checkpoint "$CHECKPOINT" --sem_ids "$SEM_IDS" \
        --graph_dir "$GRAPH_DIR" --beam_dump "$BEAM_DUMP" )
 
-exec python -m sid_mlp.cli.train "${ARGS[@]}"
+exec python -m sid_mlp.cli.train "${ARGS[@]}" "${@:4}"

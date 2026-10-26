@@ -174,7 +174,41 @@ class SIDMLP(nn.Module):
         return logits1, logits2, logits3, logits4
 
 
-__all__ = ["CrossAttention", "MLPBlock", "SIDMLP", "make_mlp"]
+class SIDMLPGRU(SIDMLP):
+    """SID-MLP heads with a GRU history readout (serving requires no teacher)."""
+    def __init__(self, embedding_weight, **kwargs):
+        super().__init__(embedding_weight, **kwargs)
+        dim = int(kwargs.get("d_model", 128))
+        self.history_gru = nn.GRU(dim, dim, batch_first=True)
+
+    def encode(self, enc_seq, enc_mask):
+        lengths = (~enc_mask).long().sum(-1).clamp_min(1)
+        packed = nn.utils.rnn.pack_padded_sequence(
+            enc_seq, lengths.cpu(), batch_first=True, enforce_sorted=False)
+        _, hidden = self.history_gru(packed)
+        q = self.query_proj(hidden[-1])
+        h = self.norm1(q)
+        return self.norm2(h + self.ffn(h))
+
+
+class SIDMLPCNN(SIDMLP):
+    """SID-MLP heads with a masked temporal convolutional history readout."""
+    def __init__(self, embedding_weight, **kwargs):
+        super().__init__(embedding_weight, **kwargs)
+        dim = int(kwargs.get("d_model", 128))
+        self.history_conv = nn.Conv1d(dim, dim, kernel_size=3, padding=1)
+
+    def encode(self, enc_seq, enc_mask):
+        valid = (~enc_mask)
+        x = (enc_seq * valid.unsqueeze(-1)).transpose(1, 2)
+        features = F.gelu(self.history_conv(x)).transpose(1, 2)
+        pooled = (features * valid.unsqueeze(-1)).sum(1) / valid.sum(1, keepdim=True).clamp_min(1)
+        q = self.query_proj(pooled)
+        h = self.norm1(q)
+        return self.norm2(h + self.ffn(h))
+
+
+__all__ = ["CrossAttention", "MLPBlock", "SIDMLP", "SIDMLPGRU", "SIDMLPCNN", "make_mlp"]
 
 
 class SIDMLPPD(SIDMLP):

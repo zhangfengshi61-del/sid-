@@ -34,7 +34,8 @@ from .losses import (
     student_list_scores_pd,
     topk_correct,
 )
-from .models import SIDMLP, SIDMLPJP, SIDMLPPD  # s23/s24
+from .models import SIDMLP, SIDMLPJP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN  # s23/s24
+from .musid_kd import hcda_loss, rigd_loss, estimate_rigd_scales
 
 import torch.nn.functional as F
 
@@ -58,6 +59,8 @@ def _save_prefix(args):
         f"_hhid{args.head_hidden}_hl{args.head_layers}"
         f"_lr{_fmt_float(args.lr)}"
     )
+    if getattr(args, "musid_kd", False):
+        base += f"_musid_{getattr(args, 'readout', 'mlp')}_seed{args.seed}"
     if args.run_tag:
         base += f"_{args.run_tag}"
     return base
@@ -142,6 +145,10 @@ def _batch_loss(args, model, batch, list_masks=None):
             + F.cross_entropy(logits3, gd3)
             + F.cross_entropy(logits4, gd4)
         )
+    elif getattr(args, "musid_kd", False):
+        # Paper Eq. (2): observed next-item CE, without conventional token KD.
+        digit_loss = sum(F.cross_entropy(z, gt) for z, gt in zip(
+            (logits1, logits2, logits3, logits4), (gd1, gd2, gd3, gd4)))
     else:
         digit_loss = (
             loss_fn(args, logits1, tl1, gd1)
@@ -158,20 +165,26 @@ def _batch_loss(args, model, batch, list_masks=None):
     lam_cdrs = float(getattr(args, "cdrs_w", 0.0) or 0.0)  # s41 CDRS
     lam_serve = float(getattr(args, "serve_kl", 0.0) or 0.0)  # s43e E1
     lam_da = float(getattr(args, "da_w", 0.0) or 0.0)         # s43e DA-CDRS
-    if extras is not None and (lam_list > 0 or lam_pf > 0 or lam_pair > 0 or lam_cdrs > 0 or lam_serve > 0 or lam_da > 0):
+    lam_hcda = float(getattr(args, "hcda_w", 0.0) or 0.0)
+    lam_rigd = float(getattr(args, "rigd_w", 0.0) or 0.0)
+    if extras is not None and any(v > 0 for v in (lam_list, lam_pf, lam_pair, lam_cdrs, lam_serve, lam_da, lam_hcda, lam_rigd)):
         bm_cb, bm_sc, bm_nv = extras[0], extras[1], extras[2]
         bm_slp = extras[3] if len(extras) > 3 else None  # s41 CDRS: teacher per-digit logp
         M = bm_cb.shape[1]
         valid = torch.arange(M, device=bm_cb.device).unsqueeze(0) < bm_nv.unsqueeze(1)
+        # Padded beam rows may contain SIDs absent from the valid-item trie.
+        # Substitute the first (valid) candidate only for student scoring, avoiding
+        # log_softmax(all -inf), while keeping the original mask and codes for losses.
+        score_cb = torch.where(valid.unsqueeze(-1), bm_cb, bm_cb[:, :1, :].expand_as(bm_cb))
         _slp = None
         if getattr(args, "variant", "base") == "pd":
-            s_S = student_list_scores_pd(model, enc_seq, enc_mask, bm_cb, list_masks,
+            s_S = student_list_scores_pd(model, enc_seq, enc_mask, score_cb, list_masks,
                                          pd_depth=int(getattr(args, "pd_depth", 4)))
-        elif lam_cdrs > 0 or lam_da > 0:  # s41/s43e: per-digit scorer; sum == student_list_scores
-            _slp = student_list_scores_steps(model, enc_seq, enc_mask, bm_cb, list_masks)
+        elif lam_cdrs > 0 or lam_da > 0 or lam_rigd > 0:
+            _slp = student_list_scores_steps(model, enc_seq, enc_mask, score_cb, list_masks)
             s_S = _slp.sum(-1)
         else:
-            s_S = student_list_scores(model, enc_seq, enc_mask, bm_cb, list_masks)
+            s_S = student_list_scores(model, enc_seq, enc_mask, score_cb, list_masks)
         pair_negs = int(getattr(args, "pair_negs", 0))
         da_negs = int(getattr(args, "da_negs", 0))
         shared_neg_idx = None
@@ -249,6 +262,24 @@ def _batch_loss(args, model, batch, list_masks=None):
                                 neg_idx=shared_neg_idx)
             loss = loss + lam_da * l_da
             comps["da"] = float(l_da.item())
+        if lam_hcda > 0:
+            if bm_slp is None:
+                raise SystemExit("MuSID-KD HCDA requires teacher step_logp")
+            l_hcda = hcda_loss(s_S, bm_slp.detach().sum(-1), bm_cb, valid,
+                               temperature=float(getattr(args, "list_temp", 1.0)))
+            loss = loss + lam_hcda * l_hcda
+            comps["hcda"] = float(l_hcda.detach())
+        if lam_rigd > 0:
+            scale = getattr(args, "_rigd_scale", None)
+            if _slp is None or bm_slp is None or scale is None:
+                raise SystemExit("MuSID-KD RIGD requires step_logp and TRAIN-only scales")
+            l_rigd = rigd_loss(bm_slp, _slp, bm_cb, valid, scale,
+                               top_k=int(getattr(args, "pair_k", 10)),
+                               negative_end=int(getattr(args, "pair_b", 40)),
+                               margin=float(getattr(args, "rigd_margin", 0.05)),
+                               huber_beta=float(getattr(args, "rigd_huber", 1.0)))
+            loss = loss + lam_rigd * l_rigd
+            comps["rigd"] = float(l_rigd.detach())
         with torch.no_grad():
             comps["ltop1"] = float((s_S.masked_fill(~valid, -1e9).argmax(1) == 0).float().mean().item())
 
@@ -330,6 +361,23 @@ def _check_sidmlp_pp_training_tags(args):
 
 def train_sidmlp(args):
     _check_sidmlp_pp_training_tags(args)
+    musid = bool(getattr(args, "musid_kd", False))
+    if musid:
+        if not getattr(args, "beam_dump", None):
+            raise SystemExit("MuSID-KD needs a ranked teacher beam_dump with step_logp")
+        if getattr(args, "variant", "base") != "base":
+            raise SystemExit("MuSID-KD supports the factorized base SID decoder")
+        if any(float(getattr(args, key, 0) or 0) > 0 for key in
+               ("list_kl", "prefix_kl", "pair_w", "cdrs_w", "serve_kl", "da_w")):
+            raise SystemExit("MuSID-KD must not be combined with legacy ServeSID losses")
+        if getattr(args, "seqkd", False):
+            raise SystemExit("MuSID-KD uses observed-next-item CE, not seqkd")
+        if int(getattr(args, "pair_k", 10)) >= int(getattr(args, "pair_b", 40)):
+            raise SystemExit("Require pair_k < pair_b")
+        if int(getattr(args, "list_topm", 0) or 0) and int(args.list_topm) < int(args.pair_b):
+            raise SystemExit("MuSID-KD needs list_topm >= pair_b")
+    elif getattr(args, "readout", "mlp") != "mlp":
+        raise SystemExit("GRU/CNN readout is supported in MuSID-KD mode")
     if not getattr(args, "graph_dir", None):
         raise SystemExit("--graph_dir is required. Set it in the launcher script or pass it on the CLI.")
     graph_dir = os.path.abspath(args.graph_dir)
@@ -363,7 +411,19 @@ def train_sidmlp(args):
     list_masks = None
     jp_pairs = None
     if use_s24:
-        attach_beam_dump(train_ds, args.beam_dump, device, topm=int(getattr(args, 'list_topm', 0) or 0))  # s36
+        attach_beam_dump(train_ds, args.beam_dump, device,
+                         topm=int(getattr(args, 'list_topm', 0) or 0),
+                         score_from_steps=musid)
+        if musid:
+            if train_ds.bm_steplp is None:
+                raise SystemExit("MuSID-KD requires beam_dump.step_logp [N,M,4]")
+            if train_ds.bm_codes.shape[1] < int(getattr(args, "pair_b", 40)):
+                raise SystemExit("MuSID-KD beam dump must contain at least pair_b candidates per row")
+            args._rigd_scale = estimate_rigd_scales(
+                train_ds.bm_codes, train_ds.bm_steplp, train_ds.bm_nvalid,
+                top_k=int(getattr(args, "pair_k", 10)),
+                negative_end=int(getattr(args, "pair_b", 40)))
+            print(f"[MuSID-KD] train-only teacher pair scales: {args._rigd_scale.tolist()}", flush=True)
         if float(getattr(args, 'cdrs_w', 0.0) or 0.0) > 0:  # s41 CDRS
             args._cdrs_scale = getattr(train_ds, 'bm_score_scale', None)
             if args._cdrs_scale is None:
@@ -379,6 +439,8 @@ def train_sidmlp(args):
         if variant == "jp" and getattr(args, "seqkd", False):
             raise SystemExit("seqkd is not supported for the jp variant")
     elif (getattr(args, "seqkd", False)
+          or float(getattr(args, "hcda_w", 0.0) or 0.0) > 0
+          or float(getattr(args, "rigd_w", 0.0) or 0.0) > 0
           or float(getattr(args, "list_kl", 0.0) or 0.0) > 0
           or float(getattr(args, "prefix_kl", 0.0) or 0.0) > 0
           or float(getattr(args, "pair_w", 0.0) or 0.0) > 0):
@@ -389,7 +451,9 @@ def train_sidmlp(args):
         or float(getattr(args, "pair_w", 0.0) or 0.0) > 0
         or float(getattr(args, "cdrs_w", 0.0) or 0.0) > 0
         or float(getattr(args, "serve_kl", 0.0) or 0.0) > 0
-        or float(getattr(args, "da_w", 0.0) or 0.0) > 0))  # s43e
+        or float(getattr(args, "da_w", 0.0) or 0.0) > 0
+        or float(getattr(args, "hcda_w", 0.0) or 0.0) > 0
+        or float(getattr(args, "rigd_w", 0.0) or 0.0) > 0))  # MuSID-KD
     if need_masks:
         vs_path = find_valid_set(args.dataset_tag, explicit_path=args.valid_set, graph_dir=args.graph_dir)
         if vs_path is None:
@@ -449,7 +513,10 @@ def train_sidmlp(args):
         model = SIDMLPJP(embedding_weight, jp_pairs=jp_pairs, **_model_kwargs).to(device)
         print(f"SIDMLPJP: {jp_pairs.shape[0]} occupied (d1,d2) prefixes", flush=True)
     else:
-        model_cls = SIDMLPPD if variant != "base" else SIDMLP  # s23
+        if musid:
+            model_cls = {"mlp": SIDMLP, "gru": SIDMLPGRU, "cnn": SIDMLPCNN}[getattr(args, "readout", "mlp")]
+        else:
+            model_cls = SIDMLPPD if variant != "base" else SIDMLP  # s23
         if variant != "base":
             _model_kwargs["pd_depth"] = int(getattr(args, "pd_depth", 4))
             _model_kwargs["pd_mode"] = str(getattr(args, "pd_mode", "full") or "full")
@@ -469,6 +536,7 @@ def train_sidmlp(args):
             f"list_temp={getattr(args, 'list_temp', 1.0)} pd_depth={getattr(args, 'pd_depth', 4)} "
             f"pd_mode={getattr(args, 'pd_mode', 'full')}")
 
+    best_val_ndcg = float("-inf")
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_losses = []
@@ -504,6 +572,13 @@ def train_sidmlp(args):
                 max_batches=5 if args.test else None,
             )
 
+        if musid and "ndcg10" in beam_metrics and beam_metrics["ndcg10"] > best_val_ndcg:
+            best_val_ndcg = float(beam_metrics["ndcg10"])
+            best_path = os.path.join(ckpt_dir, f"{save_prefix}_best.pth")
+            torch.save({"epoch": epoch, "model_state_dict": model.state_dict(),
+                        "args": _checkpoint_args(args), "best_val_ndcg10": best_val_ndcg,
+                        "model_type": "MuSID-KD"}, best_path)
+            log(f"[MuSID-KD] validation best NDCG@10={best_val_ndcg:.6f}; saved {best_path}")
         train_loss = float(np.mean(train_losses)) if train_losses else float("inf")
         comp_str = " ".join(
             f"{k}={comp_sums[k] / max(comp_counts[k], 1):.4f}" for k in sorted(comp_sums)
@@ -521,6 +596,6 @@ def train_sidmlp(args):
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "args": _checkpoint_args(args),
-        "model_type": "SID-MLP++" if args.encoder_ckpt else "SID-MLP",
+        "model_type": "MuSID-KD" if musid else ("SID-MLP++" if args.encoder_ckpt else "SID-MLP"),
     }, final_path)
     log(f"Saved final checkpoint: {final_path}")

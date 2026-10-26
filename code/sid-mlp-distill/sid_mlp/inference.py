@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .beam import build_valid_tensors, gather_d4_mask, lookup_item_idx
 from .constants import CODEBOOK_SIZE, DIGIT_OFFSETS, quad_key_int, triplet_key_int
-from .models import SIDMLP, SIDMLPPD  # s23
+from .models import SIDMLP, SIDMLPPD, SIDMLPGRU, SIDMLPCNN  # s23/MuSID-KD
 from .pretrain_encoder import build_encoder, infer_encoder_config
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,7 +89,11 @@ def build_sidmlp_from_checkpoint(checkpoint_path, embedding_weight, device, *, l
         _kwargs["pd_mode"] = str(ckpt_args.get("pd_mode", "full") or "full")
         model = SIDMLPPD(embedding_weight, **_kwargs)
     else:
-        model = SIDMLP(embedding_weight, **_kwargs)
+        readout = ckpt_args.get("readout", "mlp")
+        cls = {"mlp": SIDMLP, "gru": SIDMLPGRU, "cnn": SIDMLPCNN}.get(readout)
+        if cls is None:
+            raise ValueError(f"Unknown checkpoint readout: {readout}")
+        model = cls(embedding_weight, **_kwargs)
     model.load_state_dict(state, strict=True)
     model.to(device).eval()
     return model, ckpt

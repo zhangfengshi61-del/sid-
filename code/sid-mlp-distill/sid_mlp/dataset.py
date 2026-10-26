@@ -66,21 +66,37 @@ def collate_fn_gpu(dataset: CommonLensDataset, indices: List[int]):
     return base + extras
 
 
-def attach_beam_dump(dataset: CommonLensDataset, dump_path: str, device: torch.device, topm: int = 0):  # s36
+def attach_beam_dump(dataset: CommonLensDataset, dump_path: str, device: torch.device, topm: int = 0,
+                     score_from_steps: bool = False):  # s36 / MuSID-KD
     """s24: attach the teacher-beam dump (codes/scores/nvalid) to a packed dataset.
     Alignment is by row index — the dump was produced by iterating the same packed cache."""
     d = torch.load(dump_path, map_location='cpu', weights_only=False)
-    if topm and int(topm) > 0:  # s36: teacher-score-sorted truncation to top-M (A7 M-sweep)
+    if score_from_steps:
+        if 'step_logp' not in d or d['step_logp'].shape != d['codes'].shape:
+            raise ValueError("MuSID-KD requires aligned step_logp [N,M,L] in teacher dump")
+        d = dict(d)
+        # Paper score sums SID-token log probabilities only (not EOS).
+        d['scores'] = d['step_logp'].float().sum(-1)
+    if score_from_steps or (topm and int(topm) > 0):
         W0 = d['scores'].shape[1]
         ar = torch.arange(W0).unsqueeze(0)
         sc = d['scores'].float().masked_fill(ar >= d['nvalid'].unsqueeze(1), float('-inf'))
-        order = sc.argsort(dim=1, descending=True)
+        order = sc.argsort(dim=1, descending=True, stable=True)
         d = dict(d)
-        d['codes'] = d['codes'].gather(1, order.unsqueeze(-1).expand(-1, -1, d['codes'].shape[-1]))[:, :topm].contiguous()
-        d['scores'] = d['scores'].gather(1, order)[:, :topm].contiguous()
-        d['nvalid'] = d['nvalid'].clamp_max(topm)
-        d['W'] = int(topm)
-        print(f"s36: beam dump truncated to top-{topm} by teacher score", flush=True)
+        d['codes'] = d['codes'].gather(1, order.unsqueeze(-1).expand(-1, -1, d['codes'].shape[-1]))
+        d['scores'] = d['scores'].gather(1, order)
+        # Critical: all per-token teacher targets follow the reordered candidate codes.
+        if 'step_logp' in d:
+            d['step_logp'] = d['step_logp'].gather(1, order.unsqueeze(-1).expand(-1, -1, d['step_logp'].shape[-1]))
+        if topm and int(topm) > 0:
+            d['codes'] = d['codes'][:, :topm].contiguous()
+            d['scores'] = d['scores'][:, :topm].contiguous()
+            if 'step_logp' in d:
+                d['step_logp'] = d['step_logp'][:, :topm].contiguous()
+            d['nvalid'] = d['nvalid'].clamp_max(topm)
+            d['W'] = int(d['codes'].shape[1])
+        if score_from_steps:
+            print("[MuSID-KD] teacher candidates sorted by SID-path scores (EOS excluded)", flush=True)
     n_ds, n_dump = len(dataset), d['codes'].shape[0]
     if n_ds != n_dump:
         raise RuntimeError(f"beam dump rows ({n_dump}) != dataset rows ({n_ds}): {dump_path}")

@@ -91,6 +91,12 @@ def _add_decoder_args(parser):
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--storage_fp16", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--musid_kd", action="store_true", help="Paper CE + HCDA + RIGD")
+    parser.add_argument("--readout", type=str, default="mlp", choices=["mlp", "gru", "cnn"])
+    parser.add_argument("--hcda_w", type=float, default=0.0)
+    parser.add_argument("--rigd_w", type=float, default=0.0)
+    parser.add_argument("--rigd_margin", type=float, default=0.05)
+    parser.add_argument("--rigd_huber", type=float, default=1.0)
     parser.add_argument("--run_tag", type=str, default="")
     parser.add_argument("--variant", type=str, default="base", choices=["base", "pd", "jp"])  # s23/s24
     parser.add_argument("--pd_depth", type=int, default=4)         # s24/s32: PD-lite depth; 4 = full PD

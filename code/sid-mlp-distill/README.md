@@ -1,60 +1,66 @@
-# ServeSID overlay for SID-MLP
+# MuSID-KD SID-MLP overlay (WWW 2027)
 
-This directory contains the anonymized source overlay for the final method. It
-is applied to the public SID-MLP repository at commit
-`02d9d8e9e8a8f7c92af63e108215174b5a60b72c`; unchanged upstream files are not
-duplicated.
+This directory overlays the public SID-MLP commit
+`02d9d8e9e8a8f7c92af63e108215174b5a60b72c`.
+Copy `sid_mlp/`, `scripts/`, and `configs/` over the upstream checkout,
+and point `SID_MLP_DIR` to it. Configure the same frozen teacher,
+semantic-ID assignment, packed history/GT caches and valid-SID trie as the
+original evaluation protocol.
 
-## Objective
+## Objective and numerical conventions
 
-The decoder is trained against the teacher's actually served candidate list,
-rather than only teacher-forced token conditionals. The adopted objective adds
-three terms to the upstream digit loss:
+`L = CE + 4 * HCDA + 31.42 * RIGD`
 
-1. **Uniform serving KL** (`serve_kl_loss`) matches teacher and student mass at
-   all four SID depths using deployed-equivalent constrained student scores.
-2. **Boundary-pair anchor** (`boundary_pair_loss`) separates teacher top-K
-   candidates from outsiders in the served boundary range.
-3. **Depth-aware CDRS correction** (`da_cdrs_loss`) matches relative per-depth
-   score contributions after normalizing teacher step scales.
+- **CE**: teacher-forced cross entropy of *observed next-item* SID digits.
+- **HCDA**: temperature 1 item-score softmax; group by each prefix
+  (positions 1 through 4); average per-request sum of KL(teacher||student).
+- **RIGD**: teacher positions 1–10 vs 11–40 (K=10, B=40). For each pair,
+  supervised levels start at first differing token and stop at L-1; last
+  digit still affects the *full* student gap. A depth's weight is its
+  stop-gradient positive loss improvement
+  `relu(softplus(0.05-Gs) - softplus(0.05-(Gs-gs_d+gt_d)))`,
+  normalized over eligible depths with floor 1e-9.
+  Huber(beta=1) acts on `(gs_d-gt_d)/sigma_d`, with
+  `sigma_d = max(training-pair std,1e-4)`.
+  Pairs with no positive weight still count as valid pairs in the mean.
+- Cached teacher `step_logp` must have shape [N, M, 4] aligned to
+  `codes`. EOS is **not** included in SID-path scores. Candidate
+  re-ranking and top-M truncation always reorder per-token logps together.
+- Distillation objectives are training-only. Online beam search is
+  unchanged and uses width 50.
 
-The final all-outsider setting is recorded in
-`configs/servesid_final.yaml`. The controlled fixed-negative sensitivity setting
-uses the same negative indices for the pair and depth-aware terms; the training
-loop checks this contract and fails closed when the ranges differ.
+MLP, GRU, and CNN variants use the same four prefix-conditioned MLP heads
+and frozen token embedding table, changing only the lightweight history
+readout. Exact match to all published parameter counts and reported
+accuracy requires the original data/caches/checkpoints; those assets
+are not in this repository.
 
-## Files
-
-| File | Role |
-|---|---|
-| `sid_mlp/losses.py` | All paper objectives and deployed-equivalent list scoring. |
-| `sid_mlp/train_decoder.py` | Objective wiring, training, validation, and control checks. |
-| `sid_mlp/models.py` | Parallel prefix-conditioned SID decoder variants. |
-| `sid_mlp/dataset.py` | Packed hidden states, teacher logits, and beam-dump attachment. |
-| `sid_mlp/inference.py` | Valid-SID constrained factorized decoding and metrics. |
-| `sid_mlp/cli/train.py` | Training CLI and configuration loading. |
-| `scripts/train.sh` | Portable launcher using environment-variable paths. |
-| `configs/*.yaml` | Upstream-compatible base and final operating points. |
-
-## Use
-
-1. Check out the upstream SID-MLP commit shown above.
-2. Copy this directory's `sid_mlp/`, `scripts/`, and `configs/` over that
-   checkout.
-3. Place the checkout under `repos/SID-MLP/`, or set `SID_MLP_DIR`.
-4. Provide the public Amazon Reviews 2023 data, semantic IDs, teacher
-   checkpoint, packed teacher cache, and augmented beam dump.
-5. From the artifact root:
+## Run
 
 ```bash
-export SERVESID_ROOT="$(pwd)"
-export CONFIG="$SERVESID_ROOT/code/sid-mlp-distill/configs/servesid_final.yaml"
-export BEAM_DUMP=/path/to/augmented_teacher_beam_dump.pt
+export SID_MLP_DIR=/path/to/upstream/SID-MLP
 export GRAPH_DIR=/path/to/packed_teacher_cache
-export MODEL_DIR=/path/to/public_model_assets
-bash code/sid-mlp-distill/scripts/train.sh sidmlp \
-  Industrial_and_Scientific 0
+export MODEL_DIR=/path/to/model_assets
+export BEAM_DUMP=/path/to/aligned_teacher_beam_dump_with_step_logp.pt
+export DATASET=AmazonReviews2014
+export READOUT=mlp
+bash code/sid-mlp-distill/scripts/run_musid_seeds.sh Beauty 0
 ```
 
-The launcher accepts path and hyperparameter overrides through environment
-variables; it contains no machine-specific defaults.
+For Toys, change category to Toys. For Video Games use the
+corresponding `AmazonReviews2023` dataset/category tags; Steam-100K
+requires its own packed cache and SID mapping. The wrapper launches
+**seeds 42, 43, 44** with separate checkpoint prefixes. Each run
+logs epoch validation metrics and saves the best validation NDCG@10
+checkpoint plus a final checkpoint; results must be independently
+evaluated and aggregated before claiming reported means/SDs.
+
+CPU-only objective checks (after overlay in a checkout with PyTorch):
+
+```bash
+PYTHONPATH=/path/to/upstream/SID-MLP python -m unittest discover \
+  -s code/sid-mlp-distill/tests -p 'test_*.py'
+```
+
+Legacy ServeSID experiments can explicitly set
+`CONFIG=code/sid-mlp-distill/configs/servesid_final.yaml`.
